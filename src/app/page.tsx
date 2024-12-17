@@ -5,6 +5,7 @@ import Web3 from 'web3';
 import { Contract } from 'web3-eth-contract';
 import { AbiItem } from 'web3-utils';
 
+// ABI do contrato, define a interface das funções disponíveis no contrato.
 const contractABI = [
   {
     "inputs": [],
@@ -365,6 +366,7 @@ const contractABI = [
   }
 ]
 
+// Interface para o tipo de dados de um evento.
 interface Event {
   name: string; 
   odds: string; 
@@ -373,10 +375,12 @@ interface Event {
   result: number;
 }
 
+// Endereços e URLs do contrato e blockchain local (Ganache).
 const contractAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS as string;
 const ganacheURL = process.env.NEXT_PUBLIC_GANACHE_URL as string;
 
 export default function Home() {
+  // Estados para gerenciar a aplicação.
   const [web3, setWeb3] = useState<Web3 | null>(null);
   const [contract, setContract] = useState<Contract<AbiItem[]> | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
