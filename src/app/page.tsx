@@ -5,7 +5,6 @@ import Web3 from 'web3';
 import { Contract } from 'web3-eth-contract';
 import { AbiItem } from 'web3-utils';
 
-// ABI do contrato (copie do Hardhat artifacts)
 const contractABI = [
   {
     "inputs": [],
@@ -364,7 +363,7 @@ const contractABI = [
     "stateMutability": "payable",
     "type": "receive"
   }
-];
+]
 
 interface Event {
   name: string; 
@@ -383,20 +382,22 @@ export default function Home() {
   const [events, setEvents] = useState<Event[]>([]);
   const [name, setName] = useState('');
   const [odds, setOdds] = useState('');
+  const [betValue, setBetValue] = useState<string>('');
+  const [prediction, setPrediction] = useState<string>('');
   const [loading, setLoading] = useState(false);
 
+  // Inicializar Web3 e carregar eventos
   useEffect(() => {
     const initWeb3 = async () => {
       const web3Instance = new Web3(ganacheURL);
-      const contractInstance = new web3Instance.eth.Contract(contractABI, contractAddress);
+      const contractInstance = new web3Instance.eth.Contract(contractABI as AbiItem[], contractAddress);
       setWeb3(web3Instance);
       setContract(contractInstance);
-  
+
       // Carregar eventos existentes
       const eventCount = Number(await contractInstance.methods.eventCount().call());
       const loadedEvents: Event[] = [];
       for (let i = 0; i < eventCount; i++) {
-        // Forçamos o tipo do retorno de bettingEvents
         const event = (await contractInstance.methods.bettingEvents(i).call()) as unknown as {
           name: string;
           odds: string;
@@ -405,39 +406,151 @@ export default function Home() {
           result: string;
         };
         loadedEvents.push({
-          name: event.name, // Nome do evento
-          odds: event.odds, // Odds retornados como string
-          totalAmount: event.totalAmount, // Valor total apostado (string em wei)
-          resolved: event.resolved, // Status do evento
-          result: parseInt(event.result, 10), // Resultado como número
+          name: event.name,
+          odds: event.odds,
+          totalAmount: event.totalAmount,
+          resolved: event.resolved,
+          result: parseInt(event.result, 10),
         });
       }
       setEvents(loadedEvents);
     };
     initWeb3();
   }, []);
-  
+
+  // Função para criar um novo evento
   const handleCreateEvent = async () => {
-    if (!web3 || !contract || !name || !odds) return;
+    if (!web3 || !contract || !name || !odds) {
+      alert('Preencha todos os campos!');
+      return;
+    }
+
     setLoading(true);
     try {
-        const accounts = await web3.eth.getAccounts();
+      const accounts = await web3.eth.getAccounts();
 
-        // Estimar o gás necessário
-        const gasEstimate = await contract.methods.createEvent(name, odds).estimateGas({ from: accounts[0] });
+      // Estimar o gás necessário
+      const gasEstimate = await contract.methods.createEvent(name, parseInt(odds, 10)).estimateGas({
+        from: accounts[0],
+      });
 
-        // Converter o limite de gás para string e enviar a transação
-        await contract.methods.createEvent(name, odds).send({
-            from: accounts[0],
-            gas: (gasEstimate + BigInt(50000)).toString(), // Convertendo para string
-        });
+      // Criar o evento no contrato
+      await contract.methods.createEvent(name, parseInt(odds, 10)).send({
+        from: accounts[0],
+        gas: (gasEstimate + BigInt(50000)).toString(), // Buffer de gás
+      });
 
-        alert('Evento criado com sucesso!');
+      // Obter o ID do novo evento
+      const eventCount = Number(await contract.methods.eventCount().call());
+
+      // Buscar o último evento diretamente pelo ID
+      const newEvent = (await contract.methods.bettingEvents(eventCount - 1).call()) as unknown as {
+        name: string;
+        odds: string;
+        totalAmount: string;
+        resolved: boolean;
+        result: string;
+      };
+
+      // Adicionar o novo evento à lista de eventos
+      setEvents((prev) => [
+        ...prev,
+        {
+          name: newEvent.name,
+          odds: newEvent.odds,
+          totalAmount: newEvent.totalAmount,
+          resolved: newEvent.resolved,
+          result: parseInt(newEvent.result, 10),
+        },
+      ]);
+
+      alert('Evento criado com sucesso!');
+      setName('');
+      setOdds('');
     } catch (error) {
-        console.error(error);
+      console.error('Erro ao criar evento:', error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-};
+  };
+
+  // Função para apostar em um evento
+  const handlePlaceBet = async (eventId: number) => {
+    if (!web3 || !contract || !betValue || !prediction) {
+      alert('Preencha todos os campos da aposta!');
+      return;
+    }
+  
+    setLoading(true);
+    try {
+      const accounts = await web3.eth.getAccounts();
+  
+      // Converta os valores
+      const betAmountInWei = web3.utils.toWei(betValue, 'ether');
+      const predictionValue = parseInt(prediction, 10);
+  
+      // Validações locais
+      if (Number(betValue) <= 0) {
+        alert('O valor da aposta deve ser maior que 0!');
+        return;
+      }
+      if (predictionValue !== 1 && predictionValue !== 2) {
+        alert('Previsão inválida! Escolha 1 ou 2.');
+        return;
+      }
+  
+      // Simular a execução da transação
+      try {
+        await contract.methods.placeBet(eventId, predictionValue).call({
+          from: accounts[0],
+          value: betAmountInWei,
+        });
+      } catch (error) {
+        console.error('Erro ao simular aposta:', error);        
+        return;
+      }
+  
+      // Estimar o gás necessário
+      const gasEstimate = await contract.methods.placeBet(eventId, predictionValue).estimateGas({
+        from: accounts[0],
+        value: betAmountInWei,
+      });
+  
+      // Enviar a transação
+      await contract.methods.placeBet(eventId, predictionValue).send({
+        from: accounts[0],
+        value: betAmountInWei,
+        gas: (gasEstimate + BigInt(100000)).toString(),
+      });
+  
+      alert('Aposta realizada com sucesso!');
+  
+      // Atualizar o total apostado para o evento
+      const updatedEvent = (await contract.methods.bettingEvents(eventId).call()) as unknown as {
+        name: string;
+        odds: string;
+        totalAmount: string;
+        resolved: boolean;
+        result: string;
+      };
+  
+      setEvents((prev) =>
+        prev.map((event, index) =>
+          index === eventId
+            ? {
+                ...event,
+                totalAmount: updatedEvent.totalAmount, // Atualizar o total apostado
+              }
+            : event
+        )
+      );
+    } catch (error) {
+      console.error('Erro ao fazer aposta:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
 
   return (
     <div>
@@ -467,13 +580,27 @@ export default function Home() {
         {events.map((event, index) => (
           <div key={index}>
             <p>Nome: {event.name}</p>
-            <p>Odds: {Number(event.odds) / 100}</p> {/* Odds convertido para número */}
+            <p>Odds: {(Number(event.odds) / 100).toFixed(2)}</p>
             <p>Total Apostado: {web3?.utils.fromWei(event.totalAmount, 'ether')} ETH</p>
             <p>Status: {event.resolved ? 'Resolvido' : 'Pendente'}</p>
+            <div>
+              <input
+                type="number"
+                placeholder="Previsão (1 ou 2)"
+                onChange={(e) => setPrediction(e.target.value)}
+              />
+              <input
+                type="number"
+                placeholder="Valor da aposta (ETH)"
+                onChange={(e) => setBetValue(e.target.value)}
+              />
+              <button onClick={() => handlePlaceBet(index)}>
+                Apostar
+              </button>
+            </div>
           </div>
         ))}
       </section>
-
     </div>
   );
 }
